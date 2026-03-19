@@ -1,0 +1,15 @@
+# TOKOSSA - robots.txt
+User-agent: *
+Allow: /
+
+# Pages privees
+Disallow: /dashboard
+Disallow: /dashboard/*
+Disallow: /api/
+Disallow: /login
+Disallow: /checkout
+Disallow: /confirmation
+Disallow: /panier
+
+# Sitemap
+Sitemap: https://tokossa.bj/sitemap.xml

@@ -1,0 +1,398 @@
+// TOKOSSA - Schéma Base de Données
+// E-commerce Bénin - Mobile First
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// UTILISATEURS
+// ============================================
+model User {
+  id        String   @id @default(cuid())
+  phone     String   @unique // Identifiant principal (Bénin)
+  name      String?
+  email     String?
+  address   String?
+  quarter   String?  // Quartier Cotonou (Cadjehoun, Akpakpa, etc.)
+  role           String   @default("customer") // "customer" | "admin"
+  loyaltyPoints  Int      @default(0) // Solde de points de fidelite
+  orders         Order[]
+  carts          Cart[]
+  loyaltyHistory LoyaltyPoint[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([phone])
+}
+
+// ============================================
+// CATEGORIES
+// ============================================
+model Category {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  image       String?   // URL Cloudinary
+  description String?   @db.Text
+  isActive    Boolean   @default(true)
+  order       Int       @default(0) // Ordre d'affichage
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([isActive, order])
+}
+
+// ============================================
+// PRODUITS
+// ============================================
+model Product {
+  id          String      @id @default(cuid())
+  name        String
+  slug        String      @unique
+  description String      @db.Text
+  price       Int         // Prix en FCFA
+  oldPrice    Int?        // Prix barré (promo)
+  images      String[]    // URLs Cloudinary
+  stock       Int         @default(0)
+  category    String      // Garde le champ string pour compatibilite
+  categoryId  String?     // Relation optionnelle vers Category
+  categoryRef Category?   @relation(fields: [categoryId], references: [id])
+  isActive    Boolean     @default(true)
+  isFeatured   Boolean     @default(false) // Mis en avant
+  flashSaleEnd DateTime?   // Null = pas de flash sale, sinon date de fin
+  variants     ProductVariant[] // Variantes (taille, couleur, etc.)
+  orderItems   OrderItem[]
+  cartItems    CartItem[]
+  reviews      Review[]
+  favorites    Favorite[]  // Favoris des clients
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([category])
+  @@index([categoryId])
+  @@index([isActive, isFeatured])
+  @@index([isActive, createdAt])
+  @@index([slug])
+}
+
+// ============================================
+// VARIANTES PRODUIT
+// Permet de gerer taille, couleur, etc. pour un meme produit.
+// ============================================
+model ProductVariant {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name      String  // Ex: "Rouge - L", "Noir - M"
+  sku       String? // Reference interne optionnelle
+  stock     Int     @default(0)
+  price     Int?    // Override du prix si different du produit parent
+  options   Json    // Ex: {"couleur": "Rouge", "taille": "L"}
+  image     String? // Image specifique a la variante
+  isActive  Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId])
+}
+
+// ============================================
+// PANIER
+// ============================================
+model Cart {
+  id        String     @id @default(cuid())
+  userId    String?
+  user      User?      @relation(fields: [userId], references: [id])
+  sessionId String?    // Pour les utilisateurs non connectés
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([userId])
+  @@index([sessionId])
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cartId, productId])
+}
+
+// ============================================
+// COMMANDES
+// ============================================
+model Order {
+  id            String        @id @default(cuid())
+  orderNumber   String        @unique // Format: TOK-20240304-001
+  userId        String?
+  user          User?         @relation(fields: [userId], references: [id])
+  customerName  String
+  phone         String
+  email         String?
+  address       String
+  quarter       String        // Quartier de livraison
+  items         OrderItem[]
+  returns       ReturnRequest[]
+  subtotal      Int           // Sous-total FCFA
+  deliveryFee   Int           @default(0) // Frais de livraison
+  total         Int           // Total FCFA
+  status        OrderStatus   @default(PENDING)
+  paymentMethod PaymentMethod
+  paymentRef    String?       // Référence KKiaPay
+  paidAt        DateTime?
+  deliveredAt   DateTime?
+  notes              String?       @db.Text
+  isSplitPayment     Boolean       @default(false)
+  splitFirstAmount   Int?          // Montant 1ere partie
+  splitSecondAmount  Int?          // Montant 2eme partie (a la livraison)
+  splitSecondPaidAt  DateTime?     // Date paiement 2eme partie
+  promoCode          String?       // Code promo utilise
+  promoDiscount      Int           @default(0) // Montant reduction promo en FCFA
+  loyaltyPointsUsed  Int           @default(0) // Points fidelite utilises
+  loyaltyPointsEarned Int          @default(0) // Points gagnes
+  deliveryPersonId   String?       // Livreur affecte
+  deliveryPerson     DeliveryPerson? @relation(fields: [deliveryPersonId], references: [id])
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([phone])
+  @@index([status])
+  @@index([orderNumber])
+  @@index([paymentRef])
+  @@index([status, createdAt])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+  price     Int     // Prix au moment de l'achat
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+// ============================================
+// ENUMS
+// ============================================
+enum OrderStatus {
+  PENDING    // En attente de paiement/confirmation
+  CONFIRMED  // Paiement reçu / confirmée
+  PREPARING  // En préparation
+  DELIVERING // En cours de livraison
+  DELIVERED  // Livrée
+  CANCELLED  // Annulée
+}
+
+enum PaymentMethod {
+  MOBILE_MONEY
+  MTN_MOBILE_MONEY
+  MOOV_MONEY
+  CELTIS_MONEY
+  CASH_ON_DELIVERY
+}
+
+// ============================================
+// NOTIFICATIONS WHATSAPP
+// ============================================
+model WhatsAppLog {
+  id          String   @id @default(cuid())
+  phone       String
+  messageType String   // confirmation, delivery, reminder, etc.
+  content     String   @db.Text
+  status      String   @default("pending") // pending, sent, failed
+  orderId     String?
+  sentAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([phone])
+  @@index([status])
+}
+
+// ============================================
+// CODES PROMO
+// ============================================
+model PromoCode {
+  id        String    @id @default(cuid())
+  code      String    @unique
+  discount  Int       // Pourcentage ou montant fixe en FCFA
+  type      String    @default("percent") // "percent" | "fixed"
+  minOrder  Int?      // Commande minimum en FCFA
+  maxUses   Int?      // Nombre max d'utilisations
+  usedCount Int       @default(0)
+  isActive  Boolean   @default(true)
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+}
+
+// ============================================
+// PROGRAMME DE FIDÉLITÉ
+// ============================================
+enum LoyaltyPointType {
+  EARN
+  REDEEM
+}
+
+model LoyaltyPoint {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+  points    Int              // Positif pour EARN, negatif pour REDEEM
+  type      LoyaltyPointType
+  reason    String           // "purchase", "referral", "review", "welcome", "redeem"
+  orderId   String?
+  createdAt DateTime         @default(now())
+
+  @@unique([orderId, type], name: "loyalty_order_type_unique")
+  @@index([userId])
+  @@index([orderId])
+}
+
+// ============================================
+// AVIS CLIENTS
+// ============================================
+model Review {
+  id         String   @id @default(cuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  phone      String
+  name       String
+  rating     Int      // 1-5
+  comment    String   @db.Text
+  isVerified Boolean  @default(false) // Achat vérifié automatiquement
+  createdAt  DateTime @default(now())
+
+  @@index([productId])
+}
+
+// ============================================
+// ANALYTICS & TRACKING
+// ============================================
+model SaleNotification {
+  id          String   @id @default(cuid())
+  productName String
+  customerName String
+  quarter     String
+  createdAt   DateTime @default(now())
+}
+
+// ============================================
+// DEMANDES DE RETOUR
+// Permet aux clients de demander un retour
+// dans les 7 jours suivant la livraison.
+// ============================================
+model ReturnRequest {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reason      String   // "defectueux" | "ne_correspond_pas" | "autre"
+  description String?  @db.Text
+  status      String   @default("pending") // pending, approved, rejected, refunded
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([orderId])
+}
+
+// ============================================
+// PANIERS ABANDONNES
+// Capture les clients qui commencent le checkout
+// sans finaliser, pour relance WhatsApp.
+// ============================================
+model AbandonedCart {
+  id           String    @id @default(cuid())
+  phone        String
+  email        String?
+  customerName String?
+  items        Json      // Array d'objets {productId, name, price, quantity, image}
+  subtotal     Int       // Montant en FCFA
+  quarter      String?
+  status       String    @default("pending") // pending, reminded_1, reminded_2, recovered, expired
+  remindedAt   DateTime?
+  recoveredAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([phone])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================
+// LIVREURS
+// ============================================
+model DeliveryPerson {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String   @unique
+  zone      String   // Zone de livraison principale
+  isActive  Boolean  @default(true)
+  totalDeliveries Int @default(0)
+  orders    Order[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+// ============================================
+// REGLAGES DU SITE
+// Stocke les parametres configurables du site
+// (cle/valeur en JSON pour flexibilite).
+// ============================================
+model SiteSettings {
+  key       String   @id
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// FAVORIS CLIENTS
+// Persist en DB par numero de telephone.
+// Synchronise avec le localStorage Zustand.
+// ============================================
+model Favorite {
+  id        String   @id @default(cuid())
+  phone     String
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([phone, productId])
+  @@index([phone])
+}
+
+// ============================================
+// ADRESSES DE LIVRAISON
+// Multi-adresses par client (identifie par phone).
+// Permet de sauvegarder domicile, bureau, etc.
+// ============================================
+model Address {
+  id        String   @id @default(cuid())
+  phone     String
+  label     String   @default("Domicile") // "Domicile", "Bureau", etc.
+  address   String
+  quarter   String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([phone])
+}
